@@ -1,0 +1,108 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  createdAt DateTime @default(now())
+  shops     Shop[]
+  plan      Plan?
+
+  accounts  Account[]
+  sessions  Session[]
+
+  stripeCustomerId String?
+}
+
+model Account {
+  id                 String  @id @default(cuid())
+  userId             String
+  user               User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type               String
+  provider           String
+  providerAccountId  String
+  refresh_token      String?  @db.Text
+  access_token       String?  @db.Text
+  expires_at         Int?
+  token_type         String?
+  scope              String?
+  id_token           String?  @db.Text
+  session_state      String?
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expires      DateTime
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Shop {
+  id          String         @id @default(cuid())
+  userId      String
+  user        User           @relation(fields: [userId], references: [id])
+  shopDomain  String         @unique          // my-store.myshopify.com
+  accessToken String                         // Shopify offline token
+  name        String?
+  createdAt   DateTime       @default(now())
+  products    ProductCache[]
+  adDrafts    AdDraft[]
+}
+
+model ProductCache {
+  id        String   @id @default(cuid())
+  shopId    String
+  shop      Shop     @relation(fields: [shopId], references: [id])
+  shopifyId String   @unique          // Shopify product ID
+  title     String
+  imageUrl  String?
+  price     String?
+  tags      String?
+  vendor    String?
+  updatedAt DateTime @updatedAt
+}
+
+model AdDraft {
+  id        String      @id @default(cuid())
+  shopId    String
+  shop      Shop        @relation(fields: [shopId], references: [id])
+  productId String      // ProductCache.id
+  platform  AdPlatform
+  variants  Json        // [{headline, primaryText, description, cta}]
+  audiences Json?       // [{name, interests}] or keywords
+  createdAt DateTime    @default(now())
+}
+
+enum AdPlatform {
+  META
+  GOOGLE
+}
+
+model Plan {
+  id       String   @id @default(cuid())
+  userId   String   @unique
+  user     User     @relation(fields: [userId], references: [id])
+  tier     Tier     @default(FREE)
+  renewsAt DateTime?
+}
+
+enum Tier {
+  FREE
+  PRO
+}
