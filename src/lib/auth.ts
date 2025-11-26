@@ -1,80 +1,81 @@
-/** 
-import NextAuth, { type NextAuthConfig } from 'next-auth';
+// lib/auth.ts
+import type { NextAuthOptions } from 'next-auth';
+import GoogleProvider from 'next-auth/providers/google';
+import CredentialsProvider from 'next-auth/providers/credentials';
 import { PrismaAdapter } from '@auth/prisma-adapter';
-import Credentials from 'next-auth/providers/credentials';
-import { prisma } from '@/lib/prisma';
-import bcrypt from 'bcrypt';
+import { prisma } from './prisma';
+import bcrypt from 'bcryptjs';
 
-export const authConfig: NextAuthConfig = {
-  adapter: PrismaAdapter(prisma),
-  session: { strategy: 'jwt' },
+export const authOptions: NextAuthOptions = {
+  adapter: PrismaAdapter(prisma) as any,
   providers: [
-    Credentials({
+    // Google OAuth
+    GoogleProvider({
+      clientId: process.env.GOOGLE_CLIENT_ID!,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+    }),
+
+    // Email + Password
+    CredentialsProvider({
+      name: 'Credentials',
       credentials: {
         email: { label: 'Email', type: 'email' },
         password: { label: 'Password', type: 'password' },
       },
       async authorize(credentials) {
-        const email = credentials?.email?.toLowerCase().trim();
-        const password = credentials?.password ?? '';
-        if (!email || !password) return null;
+        if (!credentials?.email || !credentials.password) {
+          throw new Error('Please provide email and password.');
+        }
 
-        const user = await prisma.user.findUnique({ where: { email } });
-        if (!user || !user.passwordHash) return null;
+        const user = await prisma.user.findUnique({
+          where: { email: credentials.email },
+        });
 
-        const valid = await bcrypt.compare(password, user.passwordHash);
-        if (!valid) return null;
+        if (!user || !user.password) {
+          throw new Error('Invalid email or password.');
+        }
 
-        return { id: user.id, email: user.email!, name: user.name ?? '', role: user.role };
+        const valid = await bcrypt.compare(credentials.password, user.password);
+        if (!valid) {
+          throw new Error('Invalid email or password.');
+        }
+
+        // This object becomes `token` in the jwt callback
+        return {
+          id: user.id,
+          email: user.email,
+          name: user.email,
+        };
       },
     }),
   ],
+
+  // 🔥 Use JWT session strategy (simpler than DB while debugging)
+  session: {
+    strategy: 'jwt',
+  },
+
+  pages: {
+    signIn: '/login',
+  },
+
   callbacks: {
     async jwt({ token, user }) {
+      // `user` is defined only at login time
       if (user) {
         token.id = (user as any).id;
-        token.role = (user as any).role ?? 'user';
       }
       return token;
     },
     async session({ session, token }) {
-      if (session.user) {
-        session.user.id = String(token.id);
-        session.user.role = String((token as any).role ?? 'user');
+      // Expose id on session.user
+      if (session.user && token?.id) {
+        (session.user as any).id = token.id;
       }
       return session;
     },
   },
-};
 
-export const { handlers, auth, signIn, signOut } = NextAuth(authConfig);
-*/
-
-import { PrismaAdapter } from '@auth/prisma-adapter';
-import { prisma } from './prisma';
-import type { NextAuthOptions } from 'next-auth';
-import GoogleProvider from 'next-auth/providers/google';
-
-export const authOptions: NextAuthOptions = {
-  adapter: PrismaAdapter(prisma) as any,
-  providers: [
-    GoogleProvider({
-      clientId: process.env.GOOGLE_CLIENT_ID!,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-    }),
-    // add more providers if you want
-  ],
-  callbacks: {
-    async session({ session, user }) {
-      if (session.user) {
-        // @ts-ignore - extend session type
-        session.user.id = user.id;
-      }
-      return session;
-    },
-  },
-  pages: {
-    // optional: custom sign-in page
-    // signIn: '/auth/signin'
-  },
+  // helpful logs while debugging
+  debug: process.env.NODE_ENV === 'development',
 };
